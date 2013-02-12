@@ -1,6 +1,8 @@
 import sys
 import time
 import zmq
+import ujson
+from zmq.utils import jsonapi
 from const import ZMQ_KV8, ZMQ_KV78UWSGI, ZMQ_KV7
 from datetime import datetime, timedelta
 from time import strftime, gmtime
@@ -11,9 +13,13 @@ from copy import deepcopy
 import codecs
 from threading import Thread
 
-output = codecs.open('/var/ovapi/kv7.openov.nl/GOVI/CURRENTDB', 'r', 'UTF-8')
+jsonapi.jsonmod = ujson
+# ujson doesn't support the `separators` kwarg we use, so force its own dumps:
+jsonapi.dumps = ujson.dumps
+
+output = codecs.open('/var/apps/ovapi/CURRENTDB', 'r', 'UTF-8')
 dbname = output.read().split('\n')[0]
-conn = psycopg2.connect("dbname='%s'" % (dbname))
+conn = psycopg2.connect("dbname='%s' user='kv78' password='kv78turbo!'"% (dbname))
 
 tpc_store = {}
 stopareacode_store = {}
@@ -56,7 +62,7 @@ cur.close()
 cur = conn.cursor()
 cur.execute("""
 SELECT DISTINCT on (p.dataownercode,p.lineplanningnumber,p.linedirection)
-p.dataownercode,p.lineplanningnumber,p.linedirection,p.destinationcode
+p.dataownercode,p.lineplanningnumber,cast(p.linedirection as integer),p.destinationcode
 FROM (
 	SELECT distinct on (dataownercode,lineplanningnumber,linedirection)
 	dataownercode,lineplanningnumber,linedirection,journeypatterncode from localservicegrouppasstime
