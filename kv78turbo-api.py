@@ -19,7 +19,7 @@ jsonapi.dumps = ujson.dumps
 
 output = codecs.open('/var/apps/ovapi/CURRENTDB', 'r', 'UTF-8')
 dbname = output.read().split('\n')[0]
-conn = psycopg2.connect("dbname='%s' user='kv78' password='kv78turbo!'"% (dbname))
+conn = psycopg2.connect("dbname='%s'"% (dbname))
 
 tpc_store = {}
 stopareacode_store = {}
