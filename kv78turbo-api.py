@@ -32,7 +32,7 @@ tpc_meta = {}
 line_meta = {}
 destination_meta = {}
 
-journeystoptypefiltered = False #Indicates whether journeystoptype was filtered during import KV7import 
+journeystoptypefiltered = False #Indicates whether journeystoptype was filtered during import KV7import
 
 print 'Start loading kv7 data'
 cur = conn.cursor()
@@ -81,10 +81,10 @@ p.dataownercode,p.lineplanningnumber,cast(p.linedirection as integer),p.destinat
 FROM (
 	SELECT distinct on (dataownercode,lineplanningnumber,linedirection)
 	dataownercode,lineplanningnumber,linedirection,journeypatterncode from localservicegrouppasstime
-	WHERE journeystoptype = 'LAST' 
+	WHERE journeystoptype = 'LAST'
 	ORDER BY dataownercode,lineplanningnumber,linedirection,userstopordernumber DESC) as ljp,localservicegrouppasstime as p
 WHERE
-p.dataownercode = ljp.dataownercode AND 
+p.dataownercode = ljp.dataownercode AND
 p.lineplanningnumber = ljp.lineplanningnumber AND
 p.linedirection = ljp.linedirection AND
 p.journeypatterncode = ljp.journeypatterncode AND
@@ -113,7 +113,7 @@ except Exception as e:
     print e
 
 def totimestamp(operationdate, timestamp, row):
-    hours, minutes, seconds = timestamp.split(':')   
+    hours, minutes, seconds = timestamp.split(':')
     years, months, days = operationdate.split('-')
     if hours == 0 and minutes == 0 and seconds == 0:
         return int(0)
@@ -126,7 +126,7 @@ def totimestamp(operationdate, timestamp, row):
         return int((datetime(int(years), int(months), int(days), hours, int(minutes), int(seconds)) + timedelta(days = deltadays)).strftime("%s"))
     else:
         return int(datetime(int(years), int(months), int(days), hours, int(minutes), int(seconds)).strftime("%s"))
- 
+
 def todate(timestamp):
     return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -158,7 +158,7 @@ def cleanup():
         if 'MessageEndTime' in row and now > row['MessageEndTime']:
             if row['TimingPointCode'] in tpc_store and id in tpc_store[row['TimingPointCode']]['GeneralMessages']:
                 del(tpc_store[row['TimingPointCode']]['GeneralMessages'][id])
-            del(generalmessagestore[id])	
+            del(generalmessagestore[id])
 
 def setDelayIncrease(oldrow,newrow):
     if newrow['TripStopStatus'] == 'DRIVING' and oldrow['TripStopStatus'] != 'PLANNED' and oldrow['JourneyStopType'] != 'LAST':
@@ -173,7 +173,7 @@ def setDelayIncrease(oldrow,newrow):
     if 'JourneyDisrupted' in oldrow:
         del(oldrow['JourneyDisrupted'])
 
-def storecurrect(newrow): 	    
+def storecurrect(newrow):
     newrow['ExpectedArrivalTime'] = totimestamp(newrow['OperationDate'], newrow['ExpectedArrivalTime'], newrow)
     newrow['ExpectedDepartureTime'] = totimestamp(newrow['OperationDate'], newrow['ExpectedDepartureTime'], newrow)
     newrow['TargetArrivalTime'] = totimestamp(newrow['OperationDate'], newrow['TargetArrivalTime'], newrow)
@@ -205,7 +205,7 @@ def storecurrect(newrow):
 	    else:
                 del(row[x])
         except:
-	    pass  
+	    pass
     row['IsTimingStop'] = (row['IsTimingStop'] == '1')
 
     if row['TimingPointCode'] not in tpc_store:
@@ -220,7 +220,7 @@ def storecurrect(newrow):
     	    	    stopareacode_store[stopareacode] = [row['TimingPointCode']]
     	    elif row['TimingPointCode'] not in stopareacode_store[stopareacode]:
     	    	    stopareacode_store[stopareacode].append(row['TimingPointCode'])
-    
+
     if line_id not in line_store:
     	line_store[line_id] = {'Network': {}, 'Actuals': {}, 'Line' : {}}
     	line_store[line_id]['Line'] = {'DataOwnerCode' : row['DataOwnerCode'], 'LineDirection' : row['LineDirection'], 'LinePlanningNumber' : row['LinePlanningNumber'], 'DestinationCode' : row['DestinationCode']}
@@ -257,7 +257,7 @@ def storecurrect(newrow):
     	line_store[line_id]['Actuals'][id] = row
     elif (row['TripStopStatus'] == 'UNKNOWN' or row['TripStopStatus'] == 'CANCEL') and id in line_store[line_id]['Actuals']: #Delete canceled or non live journeys
 	del(line_store[line_id]['Actuals'][id])
-                   	
+
 def savemsgstore():
     try:
         f = open('generalmessage.json','w')
@@ -265,7 +265,7 @@ def savemsgstore():
         f.close()
     except:
         pass
-                   	
+
 def storemessage(row):
     id = '_'.join([row['DataOwnerCode'], row['MessageCodeDate'], row['MessageCodeNumber'], row['TimingPointDataOwnerCode'], row['TimingPointCode']])
     if 'MessageEndTime' is None or int(row['MessageEndTime'][0:4]) < 1900:
@@ -285,10 +285,10 @@ def deletemessage(row):
     if row['TimingPointCode'] in tpc_store and id in tpc_store[row['TimingPointCode']]['GeneralMessages']:
          del(tpc_store[row['TimingPointCode']]['GeneralMessages'][id])
     if id in generalmessagestore:
-         del(generalmessagestore[id])	
+         del(generalmessagestore[id])
     savemsgstore()
-	
-        
+
+print "Connecting to KV7 and KV8 servers"
 context = zmq.Context()
 
 kv8 = context.socket(zmq.SUB)
@@ -390,7 +390,7 @@ def queryStopAreas(arguments):
 		        del(reply[stopareacode]['TimingPointVisualAccessible'])
         return reply
     else:
-        reply = {} 
+        reply = {}
         for stopareacode in set(arguments[1].split(',')):
             if stopareacode in stopareacode_store and stopareacode != '':
                 reply[stopareacode] = {}
@@ -416,7 +416,7 @@ def queryStopAreas(arguments):
     	    	            reply[stopareacode][tpc] = {'Stop' : tpc_meta[tpc], 'GeneralMessages' : {}, 'Passes' : {}}
     	    	            tpc_store[tpc] = {'Stop' : tpc_meta[tpc], 'GeneralMessages' : {}, 'Passes' : {}}
         return reply
-   	
+
 def queryLines(arguments,no_network=False):
     if len(arguments) == 1:
         reply = {}
@@ -472,7 +472,7 @@ def recvPackage(content):
             for k,v in map(None, keys, values):
                 if v == '\\0':
                     row[k] = None
-                else:              
+                else:
                     row[k] = v
             for x in ['ReasonType', 'AdviceType', 'AdviceContent','SubAdviceType','MessageType','ReasonContent','OperatorCode', 'SubReasonType', 'MessageContent']:
                 if x in row and row[x] is None:
@@ -515,7 +515,7 @@ class read(Thread):
               arguments = url.split('/')
               if arguments[0] == 'tpc':
                   reply = queryTimingPoints(arguments)
-                  client.send_json(reply)               
+                  client.send_json(reply)
               elif arguments[0] == 'journey':
                   reply = queryJourneys(arguments)
                   client.send_json(reply)
@@ -527,11 +527,11 @@ class read(Thread):
                   client.send_json(reply)
               elif arguments[0] == 'lastupdate':
                   reply = {'LastUpdateTimeStamps' : last_updatestore, 'ServerTime' : strftime("%Y-%m-%dT%H:%M:%SZ",gmtime())}
-                  client.send_json(reply)            
+                  client.send_json(reply)
               elif arguments[0] == 'generalmessage':
                   client.send_json(generalmessagestore)
               elif arguments[0] == 'admin':
-                  client.send_json(['YO'])                
+                  client.send_json(['YO'])
               else:
                   client.send_json([])
           except Exception as e:
@@ -544,6 +544,7 @@ thread = read()
 thread.start()
 
 while True:
+    print "Finished initialization, ready to receive messages"
     socks = dict(poller.poll())
     if socks.get(kv8) == zmq.POLLIN:
         multipart = kv8.recv_multipart()
@@ -579,7 +580,7 @@ while True:
                         newnetwork[jpcode][int(stoporder)] = stop
                 if line_id not in line_store:
                     line_store[line_id] = {'Network': {}, 'Actuals': {}, 'Line' : {}}
-                line_store[line_id]['Network'] = newnetwork  
+                line_store[line_id]['Network'] = newnetwork
             if 'LINEMETA' in data:
                 for line_id, meta in data['LINEMETA'].items():
                     if line_id in line_store:
