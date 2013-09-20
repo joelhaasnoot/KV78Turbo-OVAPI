@@ -32,6 +32,9 @@ tpc_meta = {}
 line_meta = {}
 destination_meta = {}
 
+journeystoptypefiltered = False #Indicates whether journeystoptype was filtered during import KV7import 
+
+print 'Start loading kv7 data'
 cur = conn.cursor()
 cur.execute("SELECT dataownercode,lineplanningnumber,linepublicnumber,linename,transporttype from line", [])
 rows = cur.fetchall()
@@ -49,14 +52,26 @@ for row in rows:
 cur.close()
 
 cur = conn.cursor()
-cur.execute("select timingpointcode,timingpointname,timingpointtown,stopareacode,CAST(ST_Y(the_geom) AS NUMERIC(9,7)) AS lat,CAST(ST_X(the_geom) AS NUMERIC(8,7)) AS lon,visualaccessible,wheelchairaccessible FROM (select distinct t.timingpointcode as timingpointcode,visualaccessible, t.timingpointname as timingpointname, t.timingpointtown as timingpointtown,t.stopareacode as stopareacode,ST_Transform(st_setsrid(st_makepoint(coalesce(t.locationx_ew,0), coalesce(t.locationy_ns,0)), 28992), 4326) AS the_geom,wheelchairaccessible from timingpoint as t where not exists (select 1 from usertimingpoint,localservicegrouppasstime where t.timingpointcode = usertimingpoint.timingpointcode and journeystoptype = 'INFOPOINT' and usertimingpoint.dataownercode = localservicegrouppasstime.dataownercode and usertimingpoint.userstopcode = localservicegrouppasstime.userstopcode)) as W;",[])
+if journeystoptypefiltered:
+    cur.execute("""
+SELECT timingpointcode,timingpointname,timingpointtown,stopareacode,ST_Y(the_geom)::NUMERIC(9,7) AS lat,ST_X(the_geom)::NUMERIC(8,7) AS lon
+FROM (select *,ST_Transform(st_setsrid(st_makepoint(coalesce(locationx_ew,0), coalesce(locationy_ns,0)), 28992), 4326) AS the_geom FROM timingpoint) as t
+""",[])
+else:
+    cur.execute("""
+SELECT timingpointcode,timingpointname,timingpointtown,stopareacode,ST_Y(the_geom)::NUMERIC(9,7) AS lat,ST_X(the_geom)::NUMERIC(8,7) AS lon
+FROM
+(SELECT DISTINCT dataownercode,userstopcode FROM localservicegrouppasstime WHERE journeystoptype != 'INFOPOINT') as u
+JOIN usertimingpoint as ut USING (dataownercode,userstopcode)
+JOIN (select *,ST_Transform(st_setsrid(st_makepoint(coalesce(locationx_ew,0), coalesce(locationy_ns,0)), 28992), 4326) AS the_geom FROM timingpoint) as t USING (timingpointcode)
+""",[])
 kv7rows = cur.fetchall()
 for kv7row in kv7rows:
     tpc_meta[intern(kv7row[0])] = {'TimingPointName' : intern(kv7row[1]), 'TimingPointTown' : intern(kv7row[2]), 'StopAreaCode' : kv7row[3], 'Latitude' : float(kv7row[4]), 'Longitude' : float(kv7row[5])}
-    if kv7row[6] != 'UNKNOWN' and kv7row[6] is not None:
-        tpc_meta[kv7row[0]]['TimingPointVisualAccessible'] = kv7row[6]
-    if kv7row[7] != 'UNKNOWN' and kv7row[7] is not None:
-        tpc_meta[kv7row[0]]['TimingPointWheelChairAccessible'] = kv7row[7]
+    #if kv7row[6] != 'UNKNOWN' and kv7row[6] is not None:
+    #    tpc_meta[kv7row[0]]['TimingPointVisualAccessible'] = kv7row[6]
+    #if kv7row[7] != 'UNKNOWN' and kv7row[7] is not None:
+    #    tpc_meta[kv7row[0]]['TimingPointWheelChairAccessible'] = kv7row[7]
 cur.close()
 
 cur = conn.cursor()
@@ -85,6 +100,17 @@ if 'ARR_16001_1' in line_store:
 cur.close()
 conn.close()
 print 'Loaded KV7 data'
+
+try:
+    f = open('generalmessage.json','r')
+    generalmessagestore = ujson.load(f)
+    f.close()
+    for id,msg in generalmessagestore.items():
+        if msg['TimingPointCode'] not in tpc_store:
+            tpc_store[msg['TimingPointCode']] = {'Passes' : {}, 'GeneralMessages' : {}}
+        tpc_store[msg['TimingPointCode']]['GeneralMessages'][id] = msg
+except Exception as e:
+    print e
 
 def totimestamp(operationdate, timestamp, row):
     hours, minutes, seconds = timestamp.split(':')   
@@ -232,6 +258,14 @@ def storecurrect(newrow):
     elif (row['TripStopStatus'] == 'UNKNOWN' or row['TripStopStatus'] == 'CANCEL') and id in line_store[line_id]['Actuals']: #Delete canceled or non live journeys
 	del(line_store[line_id]['Actuals'][id])
                    	
+def savemsgstore():
+    try:
+        f = open('generalmessage.json','w')
+        ujson.dump(generalmessagestore,f)
+        f.close()
+    except:
+        pass
+                   	
 def storemessage(row):
     id = '_'.join([row['DataOwnerCode'], row['MessageCodeDate'], row['MessageCodeNumber'], row['TimingPointDataOwnerCode'], row['TimingPointCode']])
     if 'MessageEndTime' is None or int(row['MessageEndTime'][0:4]) < 1900:
@@ -244,13 +278,16 @@ def storemessage(row):
     else:
         tpc_store[row['TimingPointCode']] = {'Passes' : {}, 'GeneralMessages' : {id : row}}
     generalmessagestore[id] = row
+    savemsgstore()
 
 def deletemessage(row):
-        id = '_'.join([row['DataOwnerCode'], row['MessageCodeDate'], row['MessageCodeNumber'], row['TimingPointDataOwnerCode'], row['TimingPointCode']])
-        if row['TimingPointCode'] in tpc_store and id in tpc_store[row['TimingPointCode']]['GeneralMessages']:
-        	del(tpc_store[row['TimingPointCode']]['GeneralMessages'][id])
-        if id in generalmessagestore:
-        	del(generalmessagestore[id])	
+    id = '_'.join([row['DataOwnerCode'], row['MessageCodeDate'], row['MessageCodeNumber'], row['TimingPointDataOwnerCode'], row['TimingPointCode']])
+    if row['TimingPointCode'] in tpc_store and id in tpc_store[row['TimingPointCode']]['GeneralMessages']:
+         del(tpc_store[row['TimingPointCode']]['GeneralMessages'][id])
+    if id in generalmessagestore:
+         del(generalmessagestore[id])	
+    savemsgstore()
+	
         
 context = zmq.Context()
 
@@ -380,7 +417,7 @@ def queryStopAreas(arguments):
     	    	            tpc_store[tpc] = {'Stop' : tpc_meta[tpc], 'GeneralMessages' : {}, 'Passes' : {}}
         return reply
    	
-def queryLines(arguments):
+def queryLines(arguments,no_network=False):
     if len(arguments) == 1:
         reply = {}
         for line, values in line_store.items():
@@ -398,6 +435,8 @@ def queryLines(arguments):
         reply = {}
         for line in set(arguments[1].split(',')):
             if line in line_store and line != '':
+                if len(line_store[line]['Network']) == 0:
+                    continue
                 reply[line] = deepcopy(line_store[line])
                 reply[line]['ServerTime'] = strftime("%Y-%m-%dT%H:%M:%SZ",gmtime())
                 reply[line]['Actuals'] = addMeta(reply[line]['Actuals'],True)
@@ -408,10 +447,13 @@ def queryLines(arguments):
                     destination_id = reply[line]['Line']['DataOwnerCode']+'_'+reply[line]['Line']['DestinationCode']
                     if destination_id in destination_meta:
                         reply[line]['Line']['DestinationName50'] = destination_meta[destination_id]
-                for journeypatterncode,journeypattern in reply[line]['Network'].items():
-                    for userstoporder, timingpoint in journeypattern.items():
-                        if timingpoint['TimingPointCode'] in tpc_meta:
-                            timingpoint.update(tpc_meta[timingpoint['TimingPointCode']])
+                if no_network:
+                    del(reply[line]['Network'])
+                else:
+                    for journeypatterncode,journeypattern in reply[line]['Network'].items():
+                        for userstoporder, timingpoint in journeypattern.items():
+                            if timingpoint['TimingPointCode'] in tpc_meta:
+                                timingpoint.update(tpc_meta[timingpoint['TimingPointCode']])
         return reply
 
 def recvPackage(content):
@@ -461,18 +503,6 @@ def recvPackage(content):
                 print 'UNKNOWN TYPE : !!!!!' +  type
                 print content
 
-try:
-    output = codecs.open('msg', 'r', 'UTF-8')
-    recvPackage(output.read())
-except:
-    pass
-
-try:
-    output = codecs.open('msg78', 'r', 'UTF-8')
-    recvPackage(output.read())
-except:
-    pass
-
 class read(Thread):
    def __init__ (self):
       Thread.__init__(self)
@@ -480,27 +510,35 @@ class read(Thread):
       client = context.socket(zmq.REP)
       client.bind(ZMQ_KV78UWSGI)
       while True:
-        url = client.recv()
-        arguments = url.split('/')
-        if arguments[0] == 'tpc':
-            reply = queryTimingPoints(arguments)
-            client.send_json(reply)               
-        elif arguments[0] == 'journey':
-            reply = queryJourneys(arguments)
-            client.send_json(reply)
-        elif arguments[0] == 'stopareacode':
-            reply = queryStopAreas(arguments)
-            client.send_json(reply)
-        elif arguments[0] == 'line':
-            reply = queryLines(arguments)
-            client.send_json(reply)
-        elif arguments[0] == 'lastupdate':
-            reply = {'LastUpdateTimeStamps' : last_updatestore, 'ServerTime' : strftime("%Y-%m-%dT%H:%M:%SZ",gmtime())}
-            client.send_json(reply)            
-        elif arguments[0] == 'generalmessage':
-            client.send_json(generalmessagestore)
-        else:
-            client.send_json([])
+      	  url = client.recv()
+          try:
+              arguments = url.split('/')
+              if arguments[0] == 'tpc':
+                  reply = queryTimingPoints(arguments)
+                  client.send_json(reply)               
+              elif arguments[0] == 'journey':
+                  reply = queryJourneys(arguments)
+                  client.send_json(reply)
+              elif arguments[0] == 'stopareacode':
+                  reply = queryStopAreas(arguments)
+                  client.send_json(reply)
+              elif arguments[0] == 'line':
+                  reply = queryLines(arguments,no_network=(arguments[-1] == 'actuals'))
+                  client.send_json(reply)
+              elif arguments[0] == 'lastupdate':
+                  reply = {'LastUpdateTimeStamps' : last_updatestore, 'ServerTime' : strftime("%Y-%m-%dT%H:%M:%SZ",gmtime())}
+                  client.send_json(reply)            
+              elif arguments[0] == 'generalmessage':
+                  client.send_json(generalmessagestore)
+              elif arguments[0] == 'admin':
+                  client.send_json(['YO'])                
+              else:
+                  client.send_json([])
+          except Exception as e:
+              client.send_json([])
+              print e
+      Thread.__init__(self)
+
 
 thread = read()
 thread.start()
@@ -513,20 +551,44 @@ while True:
         recvPackage(content)
     elif socks.get(kv7) == zmq.POLLIN:
     	data = kv7.recv_json()
-        if 'PASSTIMES' in data:
-            for pass_id, row in data['PASSTIMES'].items():
-                id = '_'.join([row['DataOwnerCode'], str(row['LocalServiceLevelCode']), row['LinePlanningNumber'], str(row['JourneyNumber']), str(row['FortifyOrderNumber'])])
-                if id not in journey_store or int(row['UserStopOrderNumber']) not in journey_store[id]['Stops']:
-        	    storecurrect(row)
-        if 'DESTINATION' in data:
-            for dest_id, dest in data['DESTINATION'].items():
-                destination_meta[dest_id] = dest
-        if 'TIMINGPOINT' in data:
-            for tpc, timingpoint in data['TIMINGPOINT'].items():
-                tpc_meta[tpc] = timingpoint
-        if 'LINE' in data:
-            for line_id, line in data['LINE'].items():
-                line_meta[line_id] = line
+        try:
+            if 'PASSTIMES' in data:
+                for pass_id, row in data['PASSTIMES'].items():
+                    id = '_'.join([row['DataOwnerCode'], str(row['LocalServiceLevelCode']), row['LinePlanningNumber'], str(row['JourneyNumber']), str(row['FortifyOrderNumber'])])
+                    if id not in journey_store or int(row['UserStopOrderNumber']) not in journey_store[id]['Stops']:
+                        try:
+        	            storecurrect(row)
+                        except Exception as e:
+                            print e
+            if 'DESTINATION' in data:
+                for dest_id, dest in data['DESTINATION'].items():
+                    destination_meta[dest_id] = dest
+            if 'TIMINGPOINT' in data:
+                for tpc, timingpoint in data['TIMINGPOINT'].items():
+                    tpc_meta[tpc] = timingpoint
+            if 'LINE' in data:
+                for line_id, line in data['LINE'].items():
+                    line_meta[line_id] = line
+            if 'NETWORK' in data:
+                for line_id,network in data['NETWORK'].items():
+                    newnetwork = {}
+                    for jpcode,jp in network.items():
+                        if jpcode not in newnetwork:
+                            newnetwork[jpcode] = {}
+                    for stoporder,stop in jp.items():
+                        newnetwork[jpcode][int(stoporder)] = stop
+                if line_id not in line_store:
+                    line_store[line_id] = {'Network': {}, 'Actuals': {}, 'Line' : {}}
+                line_store[line_id]['Network'] = newnetwork  
+            if 'LINEMETA' in data:
+                for line_id, meta in data['LINEMETA'].items():
+                    if line_id in line_store:
+                        line_store[line_id]['Line']['DataOwnerCode'] = meta['DataOwnerCode']
+                        line_store[line_id]['Line']['LineDirection'] = meta['LineDirection']
+                        line_store[line_id]['Line']['LinePlanningNumber'] = meta['LinePlanningNumber']
+                        line_store[line_id]['Line']['DestinationCode'] = meta['DestinationCode']
+        except Exception as e:
+            print e
     if garbage > 200:
         cleanup()
         garbage = 0

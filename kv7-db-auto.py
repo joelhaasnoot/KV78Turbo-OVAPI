@@ -20,6 +20,8 @@ push = context.socket(zmq.PUSH)
 push.connect(ZMQ_KV7)
 variables = {}
 
+MINUTES_FORWARD = 90
+
 def secondsFromMidnight(time):
 	hours, minutes, seconds = time.split(':')
 	return (int(hours)*60*60) + (int(minutes)*60) + int(seconds)
@@ -35,9 +37,7 @@ def time(seconds):
         seconds -= 60*minutes
         return "%02d:%02d:%02d" % (hours, minutes, seconds)
         
-#now = datetime.now() + timedelta(hours=2) - timedelta(seconds=120)
-#now = datetime.now() + timedelta(hours=1) - timedelta(seconds=120)
-now = datetime.now() + timedelta(minutes=90) - timedelta(seconds=120) 
+now = datetime.now() + timedelta(minutes=MINUTES_FORWARD) - timedelta(seconds=120) 
 
 def broadcastmeta(dbname):
     print 'Fetching meta'
@@ -60,14 +60,20 @@ def broadcastmeta(dbname):
     cur.close()
 
     cur = conn.cursor()
-    cur.execute("select timingpointcode,timingpointname,timingpointtown,stopareacode,CAST(ST_Y(the_geom) AS NUMERIC(9,7)) AS lat,CAST(ST_X(the_geom) AS NUMERIC(8,7)) AS lon,visualaccessible,wheelchairaccessible FROM (select distinct t.timingpointcode as timingpointcode,visualaccessible,wheelchairaccessible, t.timingpointname as timingpointname, t.timingpointtown as timingpointtown,t.stopareacode as stopareacode,ST_Transform(st_setsrid(st_makepoint(coalesce(t.locationx_ew,0), coalesce(t.locationy_ns,0)), 28992), 4326) AS the_geom from timingpoint as t where not exists (select 1 from usertimingpoint,localservicegrouppasstime where t.timingpointcode = usertimingpoint.timingpointcode and journeystoptype = 'INFOPOINT' and usertimingpoint.dataownercode = localservicegrouppasstime.dataownercode and usertimingpoint.userstopcode = localservicegrouppasstime.userstopcode)) as W;",[])
+    cur.execute("""
+SELECT timingpointcode,timingpointname,timingpointtown,stopareacode,ST_Y(the_geom)::NUMERIC(9,7) AS lat,ST_X(the_geom)::NUMERIC(8,7) AS lon
+FROM
+(SELECT DISTINCT dataownercode,userstopcode FROM localservicegrouppasstime WHERE journeystoptype != 'INFOPOINT') as u
+JOIN usertimingpoint as ut USING (dataownercode,userstopcode)
+JOIN (select *,ST_Transform(st_setsrid(st_makepoint(coalesce(locationx_ew,0), coalesce(locationy_ns,0)), 28992), 4326) AS the_geom FROM timingpoint) as t USING (timingpointcode)
+    """,[])
     kv7rows = cur.fetchall()
     for kv7row in kv7rows:
         meta['TIMINGPOINT'][intern(kv7row[0])] = {'TimingPointName' : intern(kv7row[1]), 'TimingPointTown' : intern(kv7row[2]), 'StopAreaCode' : kv7row[3], 'Latitude' : float(kv7row[4]), 'Longitude' : float(kv7row[5])}
-        if kv7row[7] != 'UNKNOWN' and kv7row[7] is not None:
-            meta['TIMINGPOINT'][kv7row[0]]['TimingPointWheelChairAccessible'] = kv7row[7]
-        if kv7row[6] != 'UNKNOWN' and kv7row[6] is not None:
-            meta['TIMINGPOINT'][kv7row[0]]['TimingPointVisualAccessible'] = kv7row[6]
+        #if kv7row[7] != 'UNKNOWN' and kv7row[7] is not None:
+        #    meta['TIMINGPOINT'][kv7row[0]]['TimingPointWheelChairAccessible'] = kv7row[7]
+        #if kv7row[6] != 'UNKNOWN' and kv7row[6] is not None:
+        #    meta['TIMINGPOINT'][kv7row[0]]['TimingPointVisualAccessible'] = kv7row[6]
     push.send_json(meta)
     cur.close()
     conn.close()
@@ -95,12 +101,8 @@ def fetchandpush():
 	now += timedelta(seconds=60)
 	startrange = now.strftime("%H:%M:00")
 	startdate = now.strftime("%Y-%m-%d")
-	#endrange = (datetime.now() + timedelta(hours=2)).strftime("%H:%M:00")
-        #endrange = (datetime.now() + timedelta(hours=1)).strftime("%H:%M:00")
-        endrange = (datetime.now() + timedelta(minutes=90)).strftime("%H:%M:00")
-        #now = (datetime.now() + timedelta(hours=2) - timedelta(minutes=1))
-        #now = (datetime.now() + timedelta(hours=1) - timedelta(minutes=1))
-        now = (datetime.now() + timedelta(minutes=90) - timedelta(minutes=1))
+        endrange = (datetime.now() + timedelta(minutes=MINUTES_FORWARD)).strftime("%H:%M:00")
+        now = (datetime.now() + timedelta(minutes=MINUTES_FORWARD) - timedelta(minutes=1))
         startdate48 = ((now + timedelta(seconds=60))-timedelta(days=1)).strftime("%Y-%m-%d") 
 	if endrange == '00:00:00':
 		endrange = '24:00:00'
