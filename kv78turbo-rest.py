@@ -17,11 +17,11 @@ def KV78Client(environ, start_response):
     url = environ['PATH_INFO'][1:]
     if len(url) > 0 and url[-1] == '/':
         url = url[:-1]
-   
+
     arguments = url.split('/')
     if arguments[0] not in set(['tpc','journey','line','linesgh','stopareacode','lastupdate','generalmessage','line2']) or len(arguments) > 3:
          return notfound(start_response)
-   
+
     context = zmq.Context()
     client = context.socket(zmq.REQ)
     client.connect(ZMQ_KV78UWSGI)
@@ -50,10 +50,10 @@ def KV78Client(environ, start_response):
 	           sghlines[key] = value
 	       elif key.startswith('CXX_R'):
                    sghlines[key] = value
-	       elif key.startswith('VTN_40'):  
+	       elif key.startswith('VTN_40'):
 	           sghlines[key] = value
 	       elif key.startswith('CXX_W'):
-	           sghlines[key] = value 
+	           sghlines[key] = value
                elif key.startswith('QBUZZ_r270') or key.startswith('QBUZZ_r170'):
                    sghlines[key] = value
             lines['sgh'] = simplejson.dumps(sghlines)
@@ -77,7 +77,7 @@ def KV78Client(environ, start_response):
         reply = client.recv()
     if len(reply) < 3:
         return notfound(start_response)
-        
+
     start_response('200 OK', COMMON_HEADERS + [('Content-length', str(len(reply)))])
     return reply
 

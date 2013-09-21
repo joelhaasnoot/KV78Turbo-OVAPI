@@ -1,0 +1,53 @@
+
+sudo apt-get install postgresql git wget python python-pip python-dev python-psycopg2 libzmq-dev
+
+sudo pip install pyzmq uwsgi simplejson
+
+
+mkdir ovapi && cd ovapi
+
+git clone https://github.com/joelhaasnoot/KV78Turbo-OVAPI
+git clone https://github.com/joelhaasnoot/kv7tools
+
+mkdir data && cd data
+
+wget -N --accept=gz -r http://kv7.openov.nl/GOVI/KV7planning/ -l 1 -e robots=off -x 4
+# Dat kan slimmer - we're downloading index files...
+wget -N --accept=gz -r http://kv7.openov.nl/GOVI/KV7kalender/ -l 1 -e robots=off  -x 4
+
+python kv7kalender-index.py ../data/kv7.openov.nl/GOVI/KV7kalender
+touch kv7planning.idx
+python kv7planning-index.py ../data/kv7.openov.nl/GOVI/KV7planning    #duurt enkele minuten
+
+#start here
+python kv7-import2.py KV7kalender ../data/kv7.openov.nl/GOVI/KV7planning
+
+sudo su - postgres
+createdb kv78turbo #postgresql
+psql -d kv78turbo -f kv7_create.sql
+psql -d kv78turbo -f kv7.sql
+
+#POSTGIS - http://trac.osgeo.org/postgis/wiki/UsersWikiPostGIS20Ubuntu1204src
+sudo apt-get install build-essential postgresql-9.1 postgresql-server-dev-9.1 libxml2-dev libproj-dev libjson0-dev xsltproc docbook-xsl docbook-mathml libgdal1-dev
+
+wget http://download.osgeo.org/geos/geos-3.3.9.tar.bz2
+tar xfj geos-3.3.9.tar.bz2
+cd geos-3.3.9
+./configure
+make
+sudo make install
+cd ..
+
+wget http://download.osgeo.org/postgis/source/postgis-2.1.0.tar.gz
+tar xfz postgis-2.1.0.tar.gz
+cd postgis-2.0.4
+./configure
+make
+sudo make install
+sudo ldconfig
+sudo make comments-install
+sudo ln -sf /usr/share/postgresql-common/pg_wrapper /usr/local/bin/shp2pgsql
+sudo ln -sf /usr/share/postgresql-common/pg_wrapper /usr/local/bin/pgsql2shp
+sudo ln -sf /usr/share/postgresql-common/pg_wrapper /usr/local/bin/raster2pgsql
+
+#psql -d kv78turbo -c "create extension postgis" #Zo werkt het met postgis 2.0, 1.5 iets anders.
